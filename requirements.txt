@@ -1,0 +1,36 @@
+# Super Scraper Requirements
+# Python 3.8+ required
+
+# Core framework
+Scrapy>=2.11.0
+
+# Scrapy dependencies (automatically installed)
+# These are listed for clarity
+Twisted>=22.10.0
+w3lib>=2.1.1
+lxml>=4.9.0
+cssselect>=1.2.0
+itemadapter>=0.8.0
+parsel>=1.7.0
+PyDispatcher>=2.0.7
+service-identity>=21.1.0
+queuelib>=1.6.2
+protego>=0.3.0
+tldextract>=3.4.0
+cryptography>=39.0.0
+pyOpenSSL>=23.0.0
+itemloaders>=1.1.0
+zope.interface>=5.5.0
+h2>=4.1.0
+
+# Additional useful packages
+ipython>=8.10.0  # For scrapy shell debugging
+
+# Playwright for JavaScript-heavy sites and bot detection bypass
+playwright>=1.40.0
+pandas>=2.0.0  # For data handling in playwright scraper
+
+# Pydoll for intelligent web scraping
+pydoll>=0.1.0
+requests>=2.31.0  # For HTTP requests in pydoll scraper
+beautifulsoup4>=4.12.0  # For HTML parsing in pydoll scraper
