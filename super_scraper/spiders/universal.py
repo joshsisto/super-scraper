@@ -46,6 +46,22 @@ class UniversalSpider(scrapy.Spider):
         """
         self.logger.info(f"Parsing page: {response.url}")
         
+        # Store response data for validation (limit content to first 10KB for memory efficiency)
+        content_sample = response.text[:10000] if len(response.text) > 10000 else response.text
+        # Safely get response time, handling cases where meta is not available (e.g., in tests)
+        try:
+            response_time = getattr(response.meta, 'download_latency', 0)
+        except AttributeError:
+            response_time = 0
+            
+        self.response_data = {
+            'status_code': response.status,
+            'headers': dict(response.headers),
+            'content': content_sample,
+            'url': response.url,
+            'response_time': response_time
+        }
+        
         # Common selectors for product/item containers
         item_selectors = [
             'article.product_pod',  # books.toscrape.com

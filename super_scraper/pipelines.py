@@ -268,3 +268,153 @@ class DuplicateFilterPipeline:
         self.logger.info(f"Duplicate Filter Statistics:")
         self.logger.info(f"  Unique items: {len(self.seen_items)}")
         self.logger.info(f"  Duplicates filtered: {self.duplicates_count}")
+
+
+class ValidationPipeline:
+    """
+    Pipeline to validate scraping results using the ScrapingValidator.
+    
+    This pipeline runs after all items are processed and provides comprehensive
+    analysis of scraping success, blocking detection, and bot detection.
+    """
+    
+    def __init__(self):
+        self.logger = logging.getLogger(__name__)
+        self.items_collected = []
+        self.response_data = None
+        # Import validator here to avoid dependency issues if not available
+        try:
+            from validator import ScrapingValidator
+            self.validator = ScrapingValidator(self.logger)
+            self.validator_available = True
+        except ImportError as e:
+            self.logger.warning(f"ScrapingValidator not available: {e}")
+            self.validator_available = False
+    
+    def process_item(self, item, spider):
+        """
+        Collect items for batch validation.
+        
+        Args:
+            item: The scraped item
+            spider: The spider instance
+            
+        Returns:
+            The unchanged item
+        """
+        if self.validator_available:
+            adapter = ItemAdapter(item)
+            self.items_collected.append(dict(adapter))
+        return item
+    
+    def close_spider(self, spider):
+        """
+        Validate collected results when spider finishes.
+        
+        Args:
+            spider: The spider instance
+        """
+        if not self.validator_available:
+            self.logger.info("Skipping validation - ScrapingValidator not available")
+            return
+        
+        # Get response data from spider if available
+        if hasattr(spider, 'response_data') and spider.response_data:
+            response_data = spider.response_data
+        else:
+            # Create minimal response data if not available
+            response_data = {
+                'status_code': 200,
+                'headers': {},
+                'content': '',
+                'url': getattr(spider, 'start_urls', [''])[0] if hasattr(spider, 'start_urls') else '',
+                'response_time': 0
+            }
+        
+        try:
+            # Validate the scraping results
+            result = self.validator.validate_scraping_result(
+                response_data=response_data,
+                scraped_data=self.items_collected
+            )
+            
+            # Log comprehensive validation results
+            self.logger.info("=" * 50)
+            self.logger.info("SCRAPING VALIDATION RESULTS")
+            self.logger.info("=" * 50)
+            self.logger.info(f"Summary: {self.validator.get_validation_summary(result)}")
+            
+            if result.is_successful:
+                self.logger.info("✓ SCRAPING SUCCESSFUL - Data quality meets standards")
+            else:
+                self.logger.warning("✗ SCRAPING ISSUES DETECTED")
+            
+            if result.is_blocked:
+                self.logger.warning(f"⚠ BLOCKING DETECTED - Type: {result.metadata.get('block_type', 'unknown')}")
+            
+            if result.bot_detection_system and result.bot_detection_system.value != 'none':
+                self.logger.info(f"🛡 BOT DETECTION SYSTEM: {result.bot_detection_system.value}")
+                if result.metadata.get('bot_indicators'):
+                    self.logger.info(f"   Indicators: {', '.join(result.metadata['bot_indicators'])}")
+            
+            # Log data statistics if available
+            if 'data_stats' in result.metadata:
+                stats = result.metadata['data_stats']
+                self.logger.info(f"📊 DATA STATISTICS:")
+                self.logger.info(f"   Total items: {stats.get('total_items', 0)}")
+                self.logger.info(f"   Quality score: {result.confidence_score:.2f}")
+                
+                field_stats = stats.get('field_completeness', {})
+                if field_stats:
+                    self.logger.info("   Field completeness:")
+                    for field, data in field_stats.items():
+                        completeness = data.get('completeness', 0)
+                        count = data.get('count', 0)
+                        self.logger.info(f"     {field}: {completeness:.1%} ({count} items)")
+            
+            # Log issues and warnings
+            if result.issues:
+                self.logger.warning("❌ ISSUES FOUND:")
+                for issue in result.issues:
+                    self.logger.warning(f"   - {issue}")
+            
+            if result.warnings:
+                self.logger.info("⚠ WARNINGS:")
+                for warning in result.warnings:
+                    self.logger.info(f"   - {warning}")
+            
+            # Store validation results in spider stats
+            if hasattr(spider, 'crawler') and spider.crawler:
+                spider.crawler.stats.set_value('validation_successful', result.is_successful)
+                spider.crawler.stats.set_value('validation_blocked', result.is_blocked)
+                spider.crawler.stats.set_value('validation_confidence', result.confidence_score)
+                spider.crawler.stats.set_value('bot_detection_system', 
+                                               result.bot_detection_system.value if result.bot_detection_system else 'none')
+                spider.crawler.stats.set_value('validation_issues_count', len(result.issues))
+                spider.crawler.stats.set_value('validation_warnings_count', len(result.warnings))
+            
+            self.logger.info("=" * 50)
+            
+            # Provide actionable recommendations
+            if result.is_blocked and not result.is_successful:
+                self.logger.warning("💡 RECOMMENDATION: Site is blocking access. Consider using:")
+                self.logger.warning("   - Playwright scraper for JavaScript rendering and anti-detection")
+                self.logger.warning("   - Pydoll scraper for adaptive fallback capabilities")
+                self.logger.warning("   - Different user agents or request delays")
+            elif not result.is_successful and not result.is_blocked:
+                self.logger.warning("💡 RECOMMENDATION: Data quality issues detected. Consider:")
+                self.logger.warning("   - Reviewing CSS selectors in spiders/universal.py")
+                self.logger.warning("   - Checking if site structure has changed")
+                self.logger.warning("   - Using browser automation for dynamic content")
+            elif result.is_successful and result.bot_detection_system and result.bot_detection_system.value != 'none':
+                self.logger.info("💡 NOTE: Bot detection system detected but scraping succeeded.")
+                self.logger.info("   Monitor for potential future blocking.")
+            
+        except Exception as e:
+            self.logger.error(f"Validation failed with error: {str(e)}")
+            self.logger.exception("Full validation error traceback:")
+            
+            # Store error in stats
+            if hasattr(spider, 'crawler') and spider.crawler:
+                spider.crawler.stats.set_value('validation_error', str(e))
+                spider.crawler.stats.set_value('validation_successful', False)
