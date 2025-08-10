@@ -2,6 +2,12 @@
 
 A comprehensive web scraping toolkit featuring three powerful scrapers: Scrapy-based, Playwright-based, and Pydoll-based. Each scraper is designed for different use cases while maintaining the same interface and output format.
 
+## Project Status
+
+![Status: Active](https://img.shields.io/badge/status-active-success.svg)
+
+This project is under active development. While the core features are stable and fully functional, expect ongoing updates and potential enhancements to the API and feature set.
+
 ## Overview of Scrapers
 
 ### 1. Scrapy-based Scraper (`run_scraper.py`)

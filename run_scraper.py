@@ -15,6 +15,7 @@ import os
 import re
 from datetime import datetime
 from urllib.parse import urlparse
+from typing import Optional
 from scrapy.crawler import CrawlerProcess
 from scrapy.utils.project import get_project_settings
 
@@ -22,7 +23,7 @@ from scrapy.utils.project import get_project_settings
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 
-def create_output_directory(url):
+def create_output_directory(url: str) -> str:
     """Create a directory name based on URL and timestamp."""
     # Parse the URL to get the domain
     parsed_url = urlparse(url)
@@ -48,7 +49,7 @@ def create_output_directory(url):
     return dir_name
 
 
-def parse_arguments():
+def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
         description='Run the Super Scraper with a target URL',
@@ -88,7 +89,7 @@ Examples:
     return parser.parse_args()
 
 
-def run_spider(url, output_file, log_level, log_file=None):
+def run_spider(url: str, output_file: str, log_level: str, log_file: Optional[str] = None) -> None:
     """Run the Scrapy spider with the provided configuration."""
     # Get project settings
     settings = get_project_settings()
@@ -116,7 +117,7 @@ def run_spider(url, output_file, log_level, log_file=None):
     process.start()
 
 
-def main():
+def main() -> None:
     """Main entry point for the script."""
     args = parse_arguments()
     

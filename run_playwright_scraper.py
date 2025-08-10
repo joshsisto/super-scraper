@@ -24,7 +24,15 @@ import pandas as pd
 
 
 def create_output_directory(url: str) -> str:
-    """Create a directory name based on URL and timestamp."""
+    """
+    Creates a timestamped output directory for a scraping job.
+    
+    Args:
+        url: The URL being scraped, used to generate the directory name.
+    
+    Returns:
+        The path to the created directory.
+    """
     # Parse the URL to get the domain
     parsed_url = urlparse(url)
     domain = parsed_url.netloc or parsed_url.path
@@ -50,7 +58,16 @@ def create_output_directory(url: str) -> str:
 
 
 def setup_logging(log_file: str, log_level: str) -> logging.Logger:
-    """Set up logging configuration."""
+    """
+    Sets up logging configuration for both file and console output.
+    
+    Args:
+        log_file: Path to the log file to write to.
+        log_level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL).
+    
+    Returns:
+        Configured logger instance.
+    """
     logger = logging.getLogger('playwright_scraper')
     logger.setLevel(getattr(logging, log_level))
     
@@ -77,7 +94,20 @@ def setup_logging(log_file: str, log_level: str) -> logging.Logger:
 
 
 class PlaywrightScraper:
-    """Playwright-based web scraper with anti-detection features."""
+    """
+    A scraper that uses Playwright to handle JavaScript-rich websites.
+    
+    This class manages the browser instance, page navigation, data extraction,
+    and result saving. It includes anti-detection measures to mimic real user
+    behavior and bypass common bot detection systems.
+    
+    Attributes:
+        start_url: The initial URL to start scraping from.
+        output_file: Path to the CSV file where results will be saved.
+        logger: Logger instance for tracking scraping progress.
+        items: List to store extracted item data.
+        visited_urls: Set to track visited URLs and avoid duplicates.
+    """
     
     def __init__(self, start_url: str, output_file: str, logger: logging.Logger):
         self.start_url = start_url
@@ -111,18 +141,28 @@ class PlaywrightScraper:
         ]
     
     async def setup_browser(self) -> Browser:
-        """Set up browser with anti-detection measures."""
+        """
+        Initializes and configures the Playwright browser instance.
+        
+        Returns:
+            A configured Playwright Browser instance with anti-detection settings.
+        """
         playwright = await async_playwright().start()
         
         # Launch browser with anti-detection settings
         browser = await playwright.chromium.launch(
             headless=True,  # Set to False for debugging
             args=[
+                # Remove the "HeadlessChrome" from navigator.userAgent
                 '--disable-blink-features=AutomationControlled',
+                # Disable site isolation to reduce detection vectors
                 '--disable-features=IsolateOrigins,site-per-process',
                 '--disable-site-isolation-trials',
+                # Disable web security for better compatibility
                 '--disable-web-security',
+                # Allow access to private networks
                 '--disable-features=BlockInsecurePrivateNetworkRequests',
+                # Security flags for Docker/container environments
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
             ]
@@ -131,18 +171,32 @@ class PlaywrightScraper:
         return browser
     
     async def create_page(self, browser: Browser) -> Page:
-        """Create a new page with anti-detection measures."""
+        """
+        Creates a new browser page with comprehensive anti-detection measures.
+        
+        Args:
+            browser: The Playwright browser instance.
+        
+        Returns:
+            A configured Page instance that mimics a real user browser.
+        """
         context = await browser.new_context(
+            # Standard desktop resolution to appear like a regular user
             viewport={'width': 1920, 'height': 1080},
+            # Recent Chrome user agent string to avoid outdated browser detection
             user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            # US locale settings to appear as a typical US user
             locale='en-US',
             timezone_id='America/New_York',
             permissions=['geolocation'],
+            # New York coordinates for geolocation consistency
             geolocation={'latitude': 40.7128, 'longitude': -74.0060},
+            # Standard desktop browser settings
             color_scheme='light',
             device_scale_factor=1,
             has_touch=False,
             is_mobile=False,
+            # Standard browser headers to mimic real requests
             extra_http_headers={
                 'Accept-Language': 'en-US,en;q=0.9',
                 'Accept-Encoding': 'gzip, deflate, br',
@@ -154,24 +208,24 @@ class PlaywrightScraper:
         
         page = await context.new_page()
         
-        # Additional anti-detection measures
+        # Add a script to be executed on every page load to bypass bot detection
         await page.add_init_script("""
-            // Override the navigator.webdriver property
+            // Override the navigator.webdriver property to hide automation
             Object.defineProperty(navigator, 'webdriver', {
                 get: () => undefined
             });
             
-            // Override plugins to look more realistic
+            // Override plugins to look more realistic (fake plugin count)
             Object.defineProperty(navigator, 'plugins', {
                 get: () => [1, 2, 3, 4, 5]
             });
             
-            // Override languages
+            // Override languages to match our user agent settings
             Object.defineProperty(navigator, 'languages', {
                 get: () => ['en-US', 'en']
             });
             
-            // Override permissions
+            // Override permissions API to behave like a real browser
             const originalQuery = window.navigator.permissions.query;
             window.navigator.permissions.query = (parameters) => (
                 parameters.name === 'notifications' ?
