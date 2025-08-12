@@ -9,6 +9,7 @@ Provides three core capabilities:
 
 import re
 import logging
+import configparser
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
@@ -59,19 +60,48 @@ class ScrapingValidator:
     3. Bot Detection System Identification - Infers anti-bot services
     """
     
-    def __init__(self, logger: Optional[logging.Logger] = None):
+    def __init__(self, logger: Optional[logging.Logger] = None, config_path: str = 'config.ini'):
         self.logger = logger or logging.getLogger(__name__)
         
-        # Configuration for data validation thresholds
-        self.min_data_quality_score = 0.7
-        self.min_required_fields = ['title']  # At minimum, need titles
-        self.max_placeholder_ratio = 0.3  # Max 30% placeholder content
+        # Load configuration from file
+        self._load_config(config_path)
         
         # Bot detection system signatures
         self._bot_detection_signatures = self._load_bot_signatures()
         
         # Common blocking indicators
         self._blocking_indicators = self._load_blocking_indicators()
+
+    def _load_config(self, config_path: str):
+        """Loads configuration from an INI file."""
+        config = configparser.ConfigParser()
+        try:
+            if not config.read(config_path):
+                self.logger.warning(f"Config file not found at {config_path}. Using default validation thresholds.")
+                # Set default values if config file is not found
+                self.min_data_quality_score = 0.7
+                self.min_required_fields = ['title']
+                self.max_placeholder_ratio = 0.3
+                return
+
+            validator_config = config['validator']
+
+            # Load data validation thresholds
+            self.min_data_quality_score = validator_config.getfloat('min_data_quality_score', 0.7)
+
+            required_fields_str = validator_config.get('min_required_fields', 'title')
+            self.min_required_fields = [field.strip() for field in required_fields_str.split(',')]
+
+            self.max_placeholder_ratio = validator_config.getfloat('max_placeholder_ratio', 0.3)
+
+            self.logger.info("Validator configuration loaded successfully.")
+
+        except Exception as e:
+            self.logger.error(f"Error loading config file: {e}. Using default values.")
+            # Fallback to defaults in case of any error
+            self.min_data_quality_score = 0.7
+            self.min_required_fields = ['title']
+            self.max_placeholder_ratio = 0.3
 
     def validate_scraping_result(self, 
                                 response_data: Dict[str, Any],
@@ -173,51 +203,45 @@ class ScrapingValidator:
             analysis['confidence'] = confidence
             return analysis
         
-        # Content-based blocking detection using both regex and BeautifulSoup
+        # Content-based blocking detection
         if content:
-            # Use BeautifulSoup for more robust HTML parsing
             try:
                 soup = BeautifulSoup(content, 'html.parser')
-                
-                # Check page title and text content for blocking indicators
                 page_text = soup.get_text().lower()
                 page_title = soup.title.string.lower() if soup.title else ''
                 
                 # Use patterns from loaded blocking indicators
                 for category, patterns in self._blocking_indicators.items():
                     for indicator in patterns:
-                        if indicator.lower() in page_text or indicator.lower() in page_title:
+                        # Use regex for more flexible matching
+                        if re.search(r'\b' + re.escape(indicator) + r'\b', page_text, re.IGNORECASE) or \
+                           re.search(r'\b' + re.escape(indicator) + r'\b', page_title, re.IGNORECASE):
+
                             block_type = self._get_block_type_from_category(category)
                             analysis['is_blocked'] = True
                             analysis['block_type'] = block_type
-                            analysis['issues'].append(f'Content blocking detected: {indicator}')
-                            analysis['confidence'] = max(analysis['confidence'], 0.8)
+                            analysis['issues'].append(f'Content blocking detected: "{indicator}"')
+                            analysis['confidence'] = max(analysis['confidence'], 0.85)
+                            # Found a match in this category, move to the next
                             break
-                
-                # Additional specific patterns for higher confidence detection
-                high_confidence_patterns = [
-                    (r'captcha|recaptcha|hcaptcha', 'CAPTCHA detected', BlockType.CAPTCHA, 0.95),
-                    (r'rate.{0,20}limit|too.{0,20}many.{0,20}request', 'Rate limiting detected', BlockType.RATE_LIMITED, 0.9),
-                    (r'checking.{0,20}your.{0,20}browser', 'Browser verification', BlockType.CAPTCHA, 0.85)
-                ]
-                
-                for pattern, message, block_type, confidence in high_confidence_patterns:
-                    if re.search(pattern, page_text, re.IGNORECASE):
-                        analysis['is_blocked'] = True
-                        analysis['block_type'] = block_type
-                        analysis['issues'].append(message)
-                        analysis['confidence'] = max(analysis['confidence'], confidence)
-                        break
-                        
+                    if analysis['is_blocked']:
+                        # If a block is already detected, we can break early
+                        # from checking other categories if we want. For now, we continue
+                        # to potentially find more specific indicators.
+                        pass
+
             except Exception as e:
                 self.logger.warning(f"Error parsing HTML content for blocking detection: {str(e)}")
                 # Fallback to simple text search if BeautifulSoup fails
-                simple_patterns = ['captcha', 'access denied', 'blocked', 'rate limit']
-                for pattern in simple_patterns:
-                    if pattern in content.lower():
-                        analysis['is_blocked'] = True
-                        analysis['issues'].append(f'Basic blocking pattern detected: {pattern}')
-                        analysis['confidence'] = max(analysis['confidence'], 0.7)
+                for category, patterns in self._blocking_indicators.items():
+                    for indicator in patterns:
+                        if indicator in content.lower():
+                            block_type = self._get_block_type_from_category(category)
+                            analysis['is_blocked'] = True
+                            analysis['block_type'] = block_type
+                            analysis['issues'].append(f'Basic blocking pattern detected: "{indicator}"')
+                            analysis['confidence'] = max(analysis['confidence'], 0.7)
+                            break
         
         # URL-based blocking detection
         blocking_url_patterns = [
@@ -437,34 +461,20 @@ class ScrapingValidator:
         return quality_score
 
     def _analyze_price_quality(self, scraped_data: List[Dict]) -> float:
-        """Analyzes the quality of extracted prices (assumes prices are already parsed)"""
+        """
+        Analyzes the quality of extracted prices.
+        Assumes prices have been pre-processed into numeric types by a pipeline.
+        """
         if not scraped_data:
             return 0.0
         
-        prices = []
-        for item in scraped_data:
-            price = item.get('price')
-            if price is not None:
-                prices.append(price)
+        prices = [item.get('price') for item in scraped_data if item.get('price') is not None]
         
         if not prices:
             return 0.0
         
-        # Since prices should already be processed by scraper pipelines,
-        # we just validate they are proper numeric types
-        valid_price_count = 0
-        for price in prices:
-            # Check if price is already a valid number (processed by pipeline)
-            if isinstance(price, (int, float)) and price >= 0:
-                valid_price_count += 1
-            elif isinstance(price, str):
-                # Handle case where pipeline didn't process the price
-                try:
-                    price_val = float(price.replace('$', '').replace(',', '').strip())
-                    if price_val >= 0:
-                        valid_price_count += 1
-                except (ValueError, AttributeError):
-                    continue
+        # Validate that prices are proper numeric types (int or float)
+        valid_price_count = sum(1 for price in prices if isinstance(price, (int, float)) and price >= 0)
         
         return valid_price_count / len(prices)
 

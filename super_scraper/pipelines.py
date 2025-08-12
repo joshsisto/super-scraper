@@ -353,7 +353,8 @@ class ValidationPipeline:
                 self.logger.warning(f"⚠ BLOCKING DETECTED - Type: {result.metadata.get('block_type', 'unknown')}")
             
             if result.bot_detection_system and result.bot_detection_system.value != 'none':
-                self.logger.info(f"🛡 BOT DETECTION SYSTEM: {result.bot_detection_system.value}")
+                confidence = result.metadata.get('bot_system_confidence', 0)
+                self.logger.info(f"🛡 BOT DETECTION SYSTEM: {result.bot_detection_system.value} (Confidence: {confidence:.1%})")
                 if result.metadata.get('bot_indicators'):
                     self.logger.info(f"   Indicators: {', '.join(result.metadata['bot_indicators'])}")
             
@@ -362,15 +363,21 @@ class ValidationPipeline:
                 stats = result.metadata['data_stats']
                 self.logger.info(f"📊 DATA STATISTICS:")
                 self.logger.info(f"   Total items: {stats.get('total_items', 0)}")
-                self.logger.info(f"   Quality score: {result.confidence_score:.2f}")
+                self.logger.info(f"   Overall Quality Score: {result.confidence_score:.2f}")
                 
+                quality_factors = stats.get('quality_factors', {})
+                if quality_factors:
+                    self.logger.info("   Quality Score Breakdown:")
+                    for factor, score in quality_factors.items():
+                        self.logger.info(f"     - {factor}: {score:.2f}")
+
                 field_stats = stats.get('field_completeness', {})
                 if field_stats:
-                    self.logger.info("   Field completeness:")
+                    self.logger.info("   Field Completeness:")
                     for field, data in field_stats.items():
                         completeness = data.get('completeness', 0)
                         count = data.get('count', 0)
-                        self.logger.info(f"     {field}: {completeness:.1%} ({count} items)")
+                        self.logger.info(f"     - {field}: {completeness:.1%} ({count} items)")
             
             # Log issues and warnings
             if result.issues:

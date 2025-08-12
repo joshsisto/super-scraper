@@ -31,6 +31,6 @@ playwright>=1.40.0
 pandas>=2.0.0  # For data handling in playwright scraper
 
 # Pydoll for intelligent web scraping
-pydoll>=0.1.0
+pydoll-python @ git+https://github.com/autoscrape-labs/pydoll.git
 requests>=2.31.0  # For HTTP requests in pydoll scraper
 beautifulsoup4>=4.12.0  # For HTML parsing in pydoll scraper
