@@ -19,7 +19,7 @@ ADDONS = {}
 USER_AGENT = "super_scraper (+https://github.com/yourusername/super_scraper)"
 
 # Obey robots.txt rules
-ROBOTSTXT_OBEY = True
+ROBOTSTXT_OBEY = False
 
 # Concurrency and throttling settings
 CONCURRENT_REQUESTS = 8

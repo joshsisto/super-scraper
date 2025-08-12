@@ -6,6 +6,15 @@ A comprehensive web scraping toolkit with three different scrapers:
 2. **Playwright-based** (`run_playwright_scraper.py`) - JavaScript-heavy sites, bot detection bypass
 3. **Pydoll-based** (`run_pydoll_scraper.py`) - Flexible with automatic fallback
 
+## Environment Setup
+
+**CRITICAL**: This project uses a virtual environment. Always activate before running commands:
+```bash
+source venv/bin/activate  # Linux/Mac
+# or
+venv\Scripts\activate     # Windows
+```
+
 ## Quick Commands
 
 ### Running Scrapers
@@ -23,30 +32,25 @@ python run_pydoll_scraper.py --url "https://example.com" [--output filename.csv]
 ### Testing
 ```bash
 # Run all tests
-python -m unittest discover tests
+python -m unittest discover tests -v
 
 # Run specific tests
 python -m unittest tests.test_spider
 python -m unittest tests.test_pipelines  
 python -m unittest tests.test_items
-python -m unittest tests.test_playwright_scraper
-python -m unittest tests.test_pydoll_scraper
-python -m unittest tests.test_integration
-
-# Verbose output
-python -m unittest discover tests -v
 ```
 
 ### Installation/Setup
 ```bash
+# Create and activate virtual environment
+python -m venv venv
+source venv/bin/activate
+
 # Install dependencies
 pip install -r requirements.txt
 
 # For Playwright scraper
 playwright install chromium
-
-# For Pydoll (if needed)
-pip install git+https://github.com/autoscrape-labs/pydoll.git
 ```
 
 ## Project Structure
@@ -85,16 +89,23 @@ super_scraper/
 - Pydoll >=0.1.0
 - pandas, requests, beautifulsoup4
 
-## Development Notes
-- All scrapers share same interface and output format
-- Scrapy: Best for standard HTML, respects robots.txt, concurrent requests
-- Playwright: Handles JavaScript, anti-detection, browser automation  
-- Pydoll: Browser automation with requests fallback, works without Chrome
-- Comprehensive error handling and logging across all scrapers
-- Built-in duplicate filtering and data validation pipelines
+## Scraper Selection Guide
+| Website Type | Use | Reason |
+|-------------|-----|---------|
+| Static HTML | Scrapy | Fast concurrent processing |
+| JavaScript-heavy | Playwright | Full browser rendering |
+| Bot-protected | Playwright | Anti-detection measures |
+| Mixed/Unknown | Pydoll | Adaptive with fallback |
+
+## Architecture Notes
+- **Data Pipeline**: URL → Scraper → Validation → Deduplication → CSV Export
+- **Shared Components**: All scrapers use identical data fields and output structure
+- **Error Handling**: Multi-layer (network, parsing, data, system) with graceful degradation
+- **Performance**: Scrapy (high throughput), Playwright (high resource), Pydoll (adaptive)
 
 ## Common Issues
-- No items found: Customize selectors in `spiders/universal.py` (Scrapy) or check site interactions (others)
+- No items found: Customize selectors in `spiders/universal.py` (Scrapy) or check site interactions
 - Browser not found: Run `playwright install chromium` or Pydoll will fallback to requests
 - JavaScript required: Use Playwright or Pydoll instead of Scrapy
 - Rate limiting: All scrapers have delays, increase if needed
+- **Always activate virtual environment first**: `source venv/bin/activate`
