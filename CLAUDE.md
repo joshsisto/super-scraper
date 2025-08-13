@@ -29,6 +29,15 @@ python run_playwright_scraper.py --url "https://example.com" [--output filename.
 python run_pydoll_scraper.py --url "https://example.com" [--output filename.csv] [--max-pages 5] [--loglevel DEBUG]
 ```
 
+### Validation Options
+All scrapers support unified validation arguments:
+```bash
+--validation-quality-score 0.8     # Confidence threshold (0.0-1.0)
+--validation-required-fields title,price  # Required field validation
+--validation-timeout 30            # Validation timeout seconds
+--enable-validation-cache          # Enable response caching
+```
+
 ### Testing
 ```bash
 # Run all tests
@@ -59,6 +68,9 @@ super_scraper/
 ├── run_scraper.py              # Scrapy CLI
 ├── run_playwright_scraper.py   # Playwright CLI  
 ├── run_pydoll_scraper.py       # Pydoll CLI
+├── validation_manager.py       # Unified validation system
+├── response_collector.py       # Response metadata collection
+├── validation_config.py        # Validation configuration
 ├── super_scraper/              # Scrapy package
 │   ├── items.py               # Data structures
 │   ├── pipelines.py           # Data validation/processing
@@ -98,7 +110,8 @@ super_scraper/
 | Mixed/Unknown | Pydoll | Adaptive with fallback |
 
 ## Architecture Notes
-- **Data Pipeline**: URL → Scraper → Validation → Deduplication → CSV Export
+- **Data Pipeline**: URL → Scraper → ValidationManager → Deduplication → CSV Export
+- **Validation System**: Unified ValidationManager with response collectors and caching
 - **Shared Components**: All scrapers use identical data fields and output structure
 - **Error Handling**: Multi-layer (network, parsing, data, system) with graceful degradation
 - **Performance**: Scrapy (high throughput), Playwright (high resource), Pydoll (adaptive)

@@ -86,6 +86,14 @@ Examples:
         help='Logging level (default: INFO)'
     )
     
+    # Add validation arguments using helper function
+    try:
+        from validation_config import add_validation_args
+        add_validation_args(parser)
+    except ImportError:
+        # Validation system not available, skip validation args
+        pass
+    
     return parser.parse_args()
 
 

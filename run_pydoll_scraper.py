@@ -418,12 +418,17 @@ class PydollScraper:
         df[columns].to_csv(self.output_file, index=False, encoding='utf-8')
         self.logger.info(f"Saved {len(df)} items to {self.output_file}")
     
-    async def run(self) -> None:
-        """Run the scraper."""
+    async def run(self, config=None) -> None:
+        """Run the scraper with optional validation."""
+        scraping_source = None
+        scraping_mode = None
+        
         try:
             # Try to start browser
             async with Chrome() as browser:
                 tab = await browser.start()
+                scraping_source = tab
+                scraping_mode = 'browser'
                 
                 # Start scraping
                 await self.scrape_page(tab, self.start_url)
@@ -437,12 +442,16 @@ class PydollScraper:
             
             try:
                 # Fallback to requests-based scraping
-                self.run_fallback()
+                scraping_source = self.run_fallback()
+                scraping_mode = 'fallback'
             except Exception as fallback_error:
                 self.logger.error(f"Fallback scraping also failed: {str(fallback_error)}")
                 raise
+        
+        # Perform validation if available
+        await self._validate_results(scraping_source, scraping_mode, config)
     
-    def run_fallback(self) -> None:
+    def run_fallback(self) -> requests.Session:
         """Fallback scraping using requests and BeautifulSoup."""
         session = requests.Session()
         session.headers.update({
@@ -453,6 +462,7 @@ class PydollScraper:
         
         self.scrape_page_fallback(session, self.start_url)
         self.save_results()
+        return session
     
     def scrape_page_fallback(self, session: requests.Session, url: str) -> None:
         """Scrape a single page using requests and BeautifulSoup."""
@@ -633,6 +643,76 @@ class PydollScraper:
                         
         except Exception as e:
             self.logger.debug(f"Error following pagination: {str(e)}")
+    
+    async def _validate_results(self, scraping_source, scraping_mode, config=None):
+        """Validate scraping results using ValidationManager."""
+        if not self.items:
+            self.logger.warning("No items scraped, skipping validation")
+            return
+        
+        try:
+            # Import validation components
+            from validation_config import get_validation_config
+            from validation_manager import ValidationManager
+            
+            # Get configuration
+            validation_config = config or get_validation_config()
+            
+            # Create ValidationManager
+            with ValidationManager(validation_config) as manager:
+                # Validate results
+                result = await manager.validate_scraping_result(
+                    scraper_type='pydoll',
+                    response_source=scraping_source,
+                    scraped_data=self.items,
+                    url=self.start_url,
+                    task_id=f"pydoll_{scraping_mode}_{int(time.time())}"
+                )
+                
+                # Log validation summary
+                self.logger.info("=" * 50)
+                self.logger.info(f"PYDOLL VALIDATION RESULTS ({scraping_mode.upper()} MODE)")
+                self.logger.info("=" * 50)
+                
+                if result.is_successful:
+                    self.logger.info("✅ Validation successful!")
+                else:
+                    self.logger.warning("❌ Validation issues detected")
+                
+                self.logger.info(f"Scraping Mode: {scraping_mode}")
+                self.logger.info(f"Confidence Score: {result.confidence_score:.2f}")
+                self.logger.info(f"Items Validated: {len(self.items)}")
+                
+                if result.is_blocked:
+                    self.logger.warning(f"🚫 Blocking detected: {result.metadata.get('block_type', 'unknown')}")
+                
+                if result.bot_detection_system and result.bot_detection_system.value != 'none':
+                    self.logger.info(f"🛡️ Bot detection system: {result.bot_detection_system.value}")
+                
+                # Log issues and warnings
+                if result.issues:
+                    self.logger.warning("Issues found:")
+                    for issue in result.issues:
+                        self.logger.warning(f"  - {issue}")
+                
+                if result.warnings:
+                    self.logger.info("Warnings:")
+                    for warning in result.warnings:
+                        self.logger.info(f"  - {warning}")
+                
+                # Mode-specific recommendations
+                if scraping_mode == 'fallback' and not result.is_successful:
+                    self.logger.warning("💡 FALLBACK MODE RECOMMENDATION:")
+                    self.logger.warning("   - Consider installing Chrome for better browser automation")
+                    self.logger.warning("   - Try Playwright scraper for advanced JavaScript handling")
+                
+                self.logger.info("=" * 50)
+                
+        except ImportError:
+            self.logger.info("Enhanced validation not available, skipping")
+        except Exception as e:
+            self.logger.error(f"Validation failed: {str(e)}")
+            # Don't let validation errors stop the scraper
 
 
 def parse_arguments():
@@ -679,6 +759,14 @@ Examples:
         help='Maximum number of pages to scrape (default: 10)'
     )
     
+    # Add validation arguments using helper function
+    try:
+        from validation_config import add_validation_args
+        add_validation_args(parser)
+    except ImportError:
+        # Validation system not available, skip validation args
+        pass
+    
     return parser.parse_args()
 
 
@@ -706,9 +794,18 @@ async def main():
     print("-" * 50)
     
     try:
+        # Get validation configuration
+        validation_config = None
+        try:
+            from validation_config import get_validation_config
+            validation_config = get_validation_config(args)
+            logger.info(f"Validation enabled with quality threshold: {validation_config.min_data_quality_score}")
+        except ImportError:
+            logger.info("Enhanced validation not available")
+        
         # Create and run scraper
         scraper = PydollScraper(args.url, output_file, logger, args.max_pages)
-        await scraper.run()
+        await scraper.run(validation_config)
         
         print("-" * 50)
         print(f"Scraping completed! Results saved to: {output_file}")

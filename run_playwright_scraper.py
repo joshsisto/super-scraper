@@ -15,6 +15,7 @@ import logging
 import os
 import re
 import sys
+import time
 from datetime import datetime
 from urllib.parse import urlparse, urljoin
 from typing import List, Dict, Optional, Any
@@ -516,9 +517,10 @@ class PlaywrightScraper:
         df[columns].to_csv(self.output_file, index=False, encoding='utf-8')
         self.logger.info(f"Saved {len(df)} items to {self.output_file}")
     
-    async def run(self) -> None:
-        """Run the scraper."""
+    async def run(self, config=None) -> None:
+        """Run the scraper with optional validation."""
         browser = None
+        page = None
         
         try:
             browser = await self.setup_browser()
@@ -530,12 +532,78 @@ class PlaywrightScraper:
             # Save results
             await self.save_results()
             
+            # Perform validation if available
+            await self._validate_results(page, config)
+            
         except Exception as e:
             self.logger.error(f"Fatal error: {str(e)}")
             raise
         finally:
             if browser:
                 await browser.close()
+    
+    async def _validate_results(self, page, config=None):
+        """Validate scraping results using ValidationManager."""
+        if not self.items:
+            self.logger.warning("No items scraped, skipping validation")
+            return
+        
+        try:
+            # Import validation components
+            from validation_config import get_validation_config
+            from validation_manager import ValidationManager
+            
+            # Get configuration
+            validation_config = config or get_validation_config()
+            
+            # Create ValidationManager
+            with ValidationManager(validation_config) as manager:
+                # Validate results
+                result = await manager.validate_scraping_result(
+                    scraper_type='playwright',
+                    response_source=page,
+                    scraped_data=self.items,
+                    url=self.start_url,
+                    task_id=f"playwright_{int(time.time())}"
+                )
+                
+                # Log validation summary
+                self.logger.info("=" * 50)
+                self.logger.info("PLAYWRIGHT VALIDATION RESULTS")
+                self.logger.info("=" * 50)
+                
+                if result.is_successful:
+                    self.logger.info("✅ Validation successful!")
+                else:
+                    self.logger.warning("❌ Validation issues detected")
+                
+                self.logger.info(f"Confidence Score: {result.confidence_score:.2f}")
+                self.logger.info(f"Items Validated: {len(self.items)}")
+                
+                if result.is_blocked:
+                    self.logger.warning(f"🚫 Blocking detected: {result.metadata.get('block_type', 'unknown')}")
+                
+                if result.bot_detection_system and result.bot_detection_system.value != 'none':
+                    self.logger.info(f"🛡️ Bot detection system: {result.bot_detection_system.value}")
+                
+                # Log issues and warnings
+                if result.issues:
+                    self.logger.warning("Issues found:")
+                    for issue in result.issues:
+                        self.logger.warning(f"  - {issue}")
+                
+                if result.warnings:
+                    self.logger.info("Warnings:")
+                    for warning in result.warnings:
+                        self.logger.info(f"  - {warning}")
+                
+                self.logger.info("=" * 50)
+                
+        except ImportError:
+            self.logger.info("Enhanced validation not available, skipping")
+        except Exception as e:
+            self.logger.error(f"Validation failed: {str(e)}")
+            # Don't let validation errors stop the scraper
 
 
 def parse_arguments():
@@ -582,6 +650,14 @@ Examples:
         help='Maximum number of pages to scrape (default: 10)'
     )
     
+    # Add validation arguments using helper function
+    try:
+        from validation_config import add_validation_args
+        add_validation_args(parser)
+    except ImportError:
+        # Validation system not available, skip validation args
+        pass
+    
     return parser.parse_args()
 
 
@@ -608,9 +684,18 @@ async def main():
     print("-" * 50)
     
     try:
+        # Get validation configuration
+        validation_config = None
+        try:
+            from validation_config import get_validation_config
+            validation_config = get_validation_config(args)
+            logger.info(f"Validation enabled with quality threshold: {validation_config.min_data_quality_score}")
+        except ImportError:
+            logger.info("Enhanced validation not available")
+        
         # Create and run scraper
         scraper = PlaywrightScraper(args.url, output_file, logger)
-        await scraper.run()
+        await scraper.run(validation_config)
         
         print("-" * 50)
         print(f"Scraping completed! Results saved to: {output_file}")

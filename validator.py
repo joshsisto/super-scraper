@@ -59,13 +59,30 @@ class ScrapingValidator:
     3. Bot Detection System Identification - Infers anti-bot services
     """
     
-    def __init__(self, logger: Optional[logging.Logger] = None):
+    def __init__(self, logger: Optional[logging.Logger] = None, config: Optional[Any] = None):
         self.logger = logger or logging.getLogger(__name__)
         
-        # Configuration for data validation thresholds
-        self.min_data_quality_score = 0.7
-        self.min_required_fields = ['title']  # At minimum, need titles
-        self.max_placeholder_ratio = 0.3  # Max 30% placeholder content
+        # Import configuration here to avoid circular imports
+        try:
+            from validation_config import ValidationConfig, DEFAULT_CONFIG
+            self.config = config if config is not None else DEFAULT_CONFIG
+            if not isinstance(self.config, ValidationConfig):
+                # If config is not ValidationConfig instance, use default
+                self.config = DEFAULT_CONFIG
+        except ImportError:
+            # Fallback to hardcoded values if validation_config is not available
+            self.logger.warning("ValidationConfig not available, using hardcoded defaults")
+            from types import SimpleNamespace
+            self.config = SimpleNamespace(
+                min_data_quality_score=0.7,
+                min_required_fields=['title'],
+                max_placeholder_ratio=0.3
+            )
+        
+        # Configuration for data validation thresholds (from config)
+        self.min_data_quality_score = self.config.min_data_quality_score
+        self.min_required_fields = self.config.min_required_fields
+        self.max_placeholder_ratio = self.config.max_placeholder_ratio
         
         # Bot detection system signatures
         self._bot_detection_signatures = self._load_bot_signatures()
