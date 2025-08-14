@@ -91,13 +91,23 @@ def setup_logging(log_file: str, log_level: str) -> logging.Logger:
 class PydollScraper:
     """Pydoll-based browser automation scraper."""
     
-    def __init__(self, start_url: str, output_file: str, logger: logging.Logger, max_pages: int = 10):
+    def __init__(self, start_url: str, logger: logging.Logger, max_pages: int = 10):
         self.start_url = start_url
-        self.output_file = output_file
         self.logger = logger
         self.max_pages = max_pages
         self.items = []
         self.visited_urls = set()
+        self.scrape_job_id = None
+        
+        # Initialize database
+        try:
+            import database
+            database.init_db()
+            self.database_available = True
+            self.logger.info("Database initialized for Pydoll scraper")
+        except Exception as e:
+            self.logger.error(f"Failed to initialize database: {e}")
+            self.database_available = False
         
         # Common selectors for product/item containers
         self.item_selectors = [
@@ -387,38 +397,63 @@ class PydollScraper:
         except Exception as e:
             self.logger.debug(f"Error following pagination: {str(e)}")
     
-    def save_results(self) -> None:
-        """Save scraped items to CSV file."""
+    def save_results(self) -> int:
+        """Save scraped items to database."""
         if not self.items:
             self.logger.warning("No items to save")
-            return
+            return 0
         
-        # Create DataFrame
-        df = pd.DataFrame(self.items)
+        if not self.database_available:
+            self.logger.error("Database not available - items not saved")
+            return 0
         
-        # Define column order
-        columns = ['title', 'price', 'description', 'image_url', 'stock_availability', 'sku']
-        
-        # Ensure all columns exist
-        for col in columns:
-            if col not in df.columns:
-                df[col] = None
-        
-        # Remove duplicates based on available columns
-        duplicate_columns = []
-        if 'title' in df.columns:
-            duplicate_columns.append('title')
-        if 'price' in df.columns and not df['price'].isna().all():
-            duplicate_columns.append('price')
-        
-        if duplicate_columns:
-            df = df.drop_duplicates(subset=duplicate_columns, keep='first')
-        
-        # Save to CSV
-        df[columns].to_csv(self.output_file, index=False, encoding='utf-8')
-        self.logger.info(f"Saved {len(df)} items to {self.output_file}")
+        try:
+            # Import database module
+            import database
+            from datetime import datetime
+            from urllib.parse import urlparse
+            
+            # Generate scrape_job_id if not set
+            if not self.scrape_job_id:
+                domain = urlparse(self.start_url).netloc.replace('www.', '')
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                self.scrape_job_id = f"{domain}_{timestamp}"
+            
+            # Remove duplicates based on title and price
+            unique_items = []
+            seen = set()
+            
+            for item in self.items:
+                # Create identifier for deduplication
+                identifier = f"{item.get('title', '')}:{item.get('price', '')}"
+                if identifier not in seen:
+                    seen.add(identifier)
+                    unique_items.append(item)
+                else:
+                    self.logger.debug(f"Skipping duplicate item: {item.get('title', 'No title')}")
+            
+            # Save to database
+            saved_count = database.save_items(
+                items=unique_items,
+                scrape_job_id=self.scrape_job_id,
+                scraper_type='pydoll',
+                url=self.start_url
+            )
+            
+            self.logger.info(f"Pydoll Scraper Statistics:")
+            self.logger.info(f"  Items collected: {len(self.items)}")
+            self.logger.info(f"  Unique items saved: {saved_count}")
+            self.logger.info(f"  Duplicates removed: {len(self.items) - len(unique_items)}")
+            self.logger.info(f"  Scrape job ID: {self.scrape_job_id}")
+            self.logger.info(f"  Database location: {database.DB_PATH}")
+            
+            return saved_count
+            
+        except Exception as e:
+            self.logger.error(f"Failed to save items to database: {e}")
+            return 0
     
-    async def run(self, config=None) -> None:
+    async def run(self, config=None) -> int:
         """Run the scraper with optional validation."""
         scraping_source = None
         scraping_mode = None
@@ -434,7 +469,8 @@ class PydollScraper:
                 await self.scrape_page(tab, self.start_url)
                 
                 # Save results
-                self.save_results()
+                saved_count = self.save_results()
+                return saved_count
             
         except Exception as e:
             self.logger.warning(f"Browser automation failed: {str(e)}")
@@ -444,6 +480,8 @@ class PydollScraper:
                 # Fallback to requests-based scraping
                 scraping_source = self.run_fallback()
                 scraping_mode = 'fallback'
+                saved_count = len(self.items)
+                return saved_count
             except Exception as fallback_error:
                 self.logger.error(f"Fallback scraping also failed: {str(fallback_error)}")
                 raise
@@ -461,7 +499,6 @@ class PydollScraper:
         })
         
         self.scrape_page_fallback(session, self.start_url)
-        self.save_results()
         return session
     
     def scrape_page_fallback(self, session: requests.Session, url: str) -> None:
@@ -723,13 +760,10 @@ def parse_arguments():
         epilog='''
 Examples:
   python run_pydoll_scraper.py --url "https://books.toscrape.com/"
-    # Creates: scraped_results/books.toscrape.com_20240115_143025/
-  
-  python run_pydoll_scraper.py --url "https://example.com" --output data.csv
-    # Creates: scraped_results/example.com_20240115_143025/data.csv
+    # Saves data to database and creates log directory: scraped_results/books.toscrape.com_20240115_143025/
   
   python run_pydoll_scraper.py --url "https://example.com" --loglevel DEBUG --max-pages 5
-    # Scrape with debug logging and limit to 5 pages
+    # Saves data to database with debug logging and limit to 5 pages
         '''
     )
     
@@ -739,11 +773,6 @@ Examples:
         help='Target URL to scrape (required)'
     )
     
-    parser.add_argument(
-        '--output',
-        default='scraped_data.csv',
-        help='Output CSV filename (default: scraped_data.csv)'
-    )
     
     parser.add_argument(
         '--loglevel',
@@ -777,8 +806,7 @@ async def main():
     # Create output directory based on URL and timestamp
     output_dir = create_output_directory(args.url)
     
-    # Update output file path to be inside the directory
-    output_file = os.path.join(output_dir, args.output)
+    # Create log file path inside the directory
     log_file = os.path.join(output_dir, 'pydoll_scraper.log')
     
     # Set up logging
@@ -787,7 +815,7 @@ async def main():
     print(f"Starting Pydoll Scraper...")
     print(f"Target URL: {args.url}")
     print(f"Output directory: {output_dir}")
-    print(f"Output file: {output_file}")
+    print(f"Data will be saved to SQLite database")
     print(f"Log file: {log_file}")
     print(f"Log level: {args.loglevel}")
     print(f"Max pages: {args.max_pages}")
@@ -804,12 +832,13 @@ async def main():
             logger.info("Enhanced validation not available")
         
         # Create and run scraper
-        scraper = PydollScraper(args.url, output_file, logger, args.max_pages)
-        await scraper.run(validation_config)
+        scraper = PydollScraper(args.url, logger, args.max_pages)
+        saved_count = await scraper.run(validation_config)
         
         print("-" * 50)
-        print(f"Scraping completed! Results saved to: {output_file}")
+        print(f"Scraping completed! {saved_count or 0} items saved to SQLite database")
         print(f"Log file saved to: {log_file}")
+        print(f"Use 'python database.py stats' to view database statistics")
         
     except Exception as e:
         print(f"Error occurred: {str(e)}", file=sys.stderr)

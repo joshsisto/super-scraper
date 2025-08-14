@@ -57,13 +57,10 @@ def parse_arguments() -> argparse.Namespace:
         epilog='''
 Examples:
   python run_scraper.py --url "https://books.toscrape.com/"
-    # Creates: scraped_results/books.toscrape.com_20240115_143025/
-  
-  python run_scraper.py --url "https://example.com" --output data.csv
-    # Creates: scraped_results/example.com_20240115_143025/data.csv
+    # Saves data to database and creates log directory: scraped_results/books.toscrape.com_20240115_143025/
   
   python run_scraper.py --url "https://example.com" --loglevel DEBUG
-    # Creates directory with debug-level logging
+    # Saves data to database with debug-level logging
         '''
     )
     
@@ -73,11 +70,6 @@ Examples:
         help='Target URL to scrape (required)'
     )
     
-    parser.add_argument(
-        '--output',
-        default='scraped_data.csv',
-        help='Output CSV filename (default: scraped_data.csv)'
-    )
     
     parser.add_argument(
         '--loglevel',
@@ -97,7 +89,7 @@ Examples:
     return parser.parse_args()
 
 
-def run_spider(url: str, output_file: str, log_level: str, log_file: Optional[str] = None) -> None:
+def run_spider(url: str, log_level: str, log_file: Optional[str] = None) -> None:
     """Run the Scrapy spider with the provided configuration."""
     # Get project settings
     settings = get_project_settings()
@@ -107,15 +99,6 @@ def run_spider(url: str, output_file: str, log_level: str, log_file: Optional[st
     if log_file:
         settings.set('LOG_FILE', log_file)
     
-    settings.set('FEEDS', {
-        output_file: {
-            'format': 'csv',
-            'encoding': 'utf8',
-            'store_empty': False,
-            'fields': ['title', 'price', 'description', 'image_url', 'stock_availability', 'sku'],
-            'indent': None,
-        }
-    })
     
     # Create crawler process
     process = CrawlerProcess(settings)
@@ -132,23 +115,23 @@ def main() -> None:
     # Create output directory based on URL and timestamp
     output_dir = create_output_directory(args.url)
     
-    # Update output file path to be inside the directory
-    output_file = os.path.join(output_dir, args.output)
+    # Create log file path inside the directory
     log_file = os.path.join(output_dir, 'scraper.log')
     
     print(f"Starting Super Scraper...")
     print(f"Target URL: {args.url}")
     print(f"Output directory: {output_dir}")
-    print(f"Output file: {output_file}")
+    print(f"Data will be saved to SQLite database")
     print(f"Log file: {log_file}")
     print(f"Log level: {args.loglevel}")
     print("-" * 50)
     
     try:
-        run_spider(args.url, output_file, args.loglevel, log_file)
+        run_spider(args.url, args.loglevel, log_file)
         print("-" * 50)
-        print(f"Scraping completed! Results saved to: {output_file}")
+        print(f"Scraping completed! Results saved to SQLite database")
         print(f"Log file saved to: {log_file}")
+        print(f"Use 'python database.py stats' to view database statistics")
     except Exception as e:
         print(f"Error occurred: {str(e)}", file=sys.stderr)
         sys.exit(1)

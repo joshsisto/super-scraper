@@ -494,3 +494,132 @@ class ValidationPipeline:
         elif result.is_successful and result.bot_detection_system and result.bot_detection_system.value != 'none':
             self.logger.info("💡 NOTE: Bot detection system detected but scraping succeeded.")
             self.logger.info("   Monitor for potential future blocking.")
+
+
+class SQLitePipeline:
+    """
+    Pipeline to save scraped items to SQLite database.
+    
+    This pipeline replaces CSV file output with database storage.
+    Items are collected during processing and saved as a batch when the spider closes.
+    """
+    
+    def __init__(self):
+        self.logger = logging.getLogger(__name__)
+        self.items_collected = []
+        self.scrape_job_id = None
+        self.scraper_type = 'scrapy'
+        self.target_url = None
+        
+        # Initialize database
+        try:
+            import database
+            database.init_db()
+            self.database_available = True
+            self.logger.info("SQLite pipeline initialized - database ready")
+        except Exception as e:
+            self.logger.error(f"Failed to initialize SQLite pipeline: {e}")
+            self.database_available = False
+    
+    def open_spider(self, spider):
+        """
+        Initialize pipeline when spider opens.
+        
+        Args:
+            spider: The spider instance
+        """
+        if not self.database_available:
+            return
+        
+        try:
+            # Generate scrape_job_id using same format as other scrapers
+            from datetime import datetime
+            from urllib.parse import urlparse
+            
+            # Get target URL from spider
+            if hasattr(spider, 'start_urls') and spider.start_urls:
+                self.target_url = spider.start_urls[0]
+                domain = urlparse(self.target_url).netloc.replace('www.', '')
+            else:
+                self.target_url = "unknown"
+                domain = "unknown"
+            
+            # Generate job ID with same format as other scrapers
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            self.scrape_job_id = f"{domain}_{timestamp}"
+            
+            self.logger.info(f"SQLite pipeline opened for job: {self.scrape_job_id}")
+            
+        except Exception as e:
+            self.logger.error(f"Error opening SQLite pipeline: {e}")
+            self.database_available = False
+    
+    def process_item(self, item, spider):
+        """
+        Collect items for batch database insertion.
+        
+        Args:
+            item: The scraped item
+            spider: The spider instance
+            
+        Returns:
+            The unchanged item
+        """
+        if self.database_available:
+            try:
+                adapter = ItemAdapter(item)
+                item_dict = dict(adapter)
+                self.items_collected.append(item_dict)
+                self.logger.debug(f"Collected item for database: {item_dict.get('title', 'No title')}")
+            except Exception as e:
+                self.logger.error(f"Error collecting item for database: {e}")
+        
+        return item
+    
+    def close_spider(self, spider):
+        """
+        Save all collected items to database when spider closes.
+        
+        Args:
+            spider: The spider instance
+        """
+        if not self.database_available:
+            self.logger.warning("SQLite pipeline unavailable - items not saved to database")
+            return
+        
+        if not self.items_collected:
+            self.logger.info("No items collected - nothing to save to database")
+            return
+        
+        try:
+            # Import database module
+            import database
+            
+            # Save items to database
+            saved_count = database.save_items(
+                items=self.items_collected,
+                scrape_job_id=self.scrape_job_id,
+                scraper_type=self.scraper_type,
+                url=self.target_url or "unknown"
+            )
+            
+            self.logger.info(f"SQLite Pipeline Statistics:")
+            self.logger.info(f"  Items collected: {len(self.items_collected)}")
+            self.logger.info(f"  Items saved to database: {saved_count}")
+            self.logger.info(f"  Scrape job ID: {self.scrape_job_id}")
+            self.logger.info(f"  Database location: {database.DB_PATH}")
+            
+            # Store stats in spider if available
+            if hasattr(spider, 'crawler') and spider.crawler:
+                spider.crawler.stats.set_value('database_items_saved', saved_count)
+                spider.crawler.stats.set_value('database_scrape_job_id', self.scrape_job_id)
+                spider.crawler.stats.set_value('database_location', database.DB_PATH)
+            
+        except Exception as e:
+            self.logger.error(f"Failed to save items to database: {e}")
+            self.logger.exception("Full database save error traceback:")
+            
+            # Store error in stats
+            if hasattr(spider, 'crawler') and spider.crawler:
+                spider.crawler.stats.set_value('database_save_error', str(e))
+                spider.crawler.stats.set_value('database_items_saved', 0)

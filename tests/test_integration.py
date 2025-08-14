@@ -162,8 +162,8 @@ class TestScraperCommonFunctionality(unittest.TestCase):
             ("Unknown", False),  # Implementation returns False for unknown
         ]
         
-        playwright_scraper = PlaywrightScraper("https://example.com", "test.csv", Mock())
-        pydoll_scraper = PydollScraper("https://example.com", "test.csv", Mock())
+        playwright_scraper = PlaywrightScraper("https://example.com", Mock())
+        pydoll_scraper = PydollScraper("https://example.com", Mock())
         
         for stock_text, expected in test_stock:
             with self.subTest(stock_text=stock_text):

@@ -20,13 +20,13 @@ venv\Scripts\activate     # Windows
 ### Running Scrapers
 ```bash
 # Scrapy scraper
-python run_scraper.py --url "https://example.com" [--output filename.csv] [--loglevel DEBUG]
+python run_scraper.py --url "https://example.com" [--loglevel DEBUG]
 
 # Playwright scraper  
-python run_playwright_scraper.py --url "https://example.com" [--output filename.csv] [--max-pages 5] [--loglevel DEBUG]
+python run_playwright_scraper.py --url "https://example.com" [--max-pages 5] [--loglevel DEBUG]
 
 # Pydoll scraper
-python run_pydoll_scraper.py --url "https://example.com" [--output filename.csv] [--max-pages 5] [--loglevel DEBUG]
+python run_pydoll_scraper.py --url "https://example.com" [--max-pages 5] [--loglevel DEBUG]
 ```
 
 ### Validation Options
@@ -38,6 +38,18 @@ All scrapers support unified validation arguments:
 --enable-validation-cache          # Enable response caching
 ```
 
+### Database Operations
+```bash
+# View database statistics
+python database.py stats
+
+# Initialize database (if needed)
+python database.py init
+
+# Clean up old data (optional)
+python database.py cleanup [days_to_keep]
+```
+
 ### Testing
 ```bash
 # Run all tests
@@ -46,7 +58,7 @@ python -m unittest discover tests -v
 # Run specific tests
 python -m unittest tests.test_spider
 python -m unittest tests.test_pipelines  
-python -m unittest tests.test_items
+python -m unittest tests.test_database
 ```
 
 ### Installation/Setup
@@ -68,6 +80,8 @@ super_scraper/
 ├── run_scraper.py              # Scrapy CLI
 ├── run_playwright_scraper.py   # Playwright CLI  
 ├── run_pydoll_scraper.py       # Pydoll CLI
+├── database.py                 # SQLite database operations
+├── scraped_data.db             # SQLite database file
 ├── validation_manager.py       # Unified validation system
 ├── response_collector.py       # Response metadata collection
 ├── validation_config.py        # Validation configuration
@@ -77,7 +91,7 @@ super_scraper/
 │   ├── settings.py            # Scrapy config
 │   └── spiders/universal.py   # Universal spider
 ├── tests/                     # Unit tests
-└── scraped_results/           # Auto-generated output dirs
+└── scraped_results/           # Log files only
 ```
 
 ## Key Data Fields Extracted
@@ -88,11 +102,11 @@ super_scraper/
 - `stock_availability` (boolean) - In stock status
 - `sku` (string) - Stock Keeping Unit ID
 
-## Output Organization
-- All outputs saved to `scraped_results/`
-- Each run creates `domain_YYYYMMDD_HHMMSS/` directory
-- Contains CSV data file and log file
-- No overwrites - each scrape gets unique directory
+## Data Storage
+- **Database**: All scraped data saved to SQLite database `scraped_data.db`
+- **Logs**: Each run creates `scraped_results/domain_YYYYMMDD_HHMMSS/` directory for log files
+- **Job Tracking**: Each scrape gets unique job ID for database queries
+- **Statistics**: Use `python database.py stats` to view data summary
 
 ## Dependencies
 - Python 3.8+
@@ -110,9 +124,10 @@ super_scraper/
 | Mixed/Unknown | Pydoll | Adaptive with fallback |
 
 ## Architecture Notes
-- **Data Pipeline**: URL → Scraper → ValidationManager → Deduplication → CSV Export
+- **Data Pipeline**: URL → Scraper → ValidationManager → Deduplication → SQLite Database
+- **Database**: Thread-safe SQLite with job tracking and metadata support
 - **Validation System**: Unified ValidationManager with response collectors and caching
-- **Shared Components**: All scrapers use identical data fields and output structure
+- **Shared Components**: All scrapers use identical data fields and database schema
 - **Error Handling**: Multi-layer (network, parsing, data, system) with graceful degradation
 - **Performance**: Scrapy (high throughput), Playwright (high resource), Pydoll (adaptive)
 

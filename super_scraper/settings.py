@@ -61,7 +61,8 @@ DEFAULT_REQUEST_HEADERS = {
 ITEM_PIPELINES = {
     "super_scraper.pipelines.DataValidationPipeline": 200,
     "super_scraper.pipelines.DuplicateFilterPipeline": 300,
-    "super_scraper.pipelines.ValidationPipeline": 400,  # Add validation pipeline
+    "super_scraper.pipelines.ValidationPipeline": 400,
+    "super_scraper.pipelines.SQLitePipeline": 500,  # Save to database last
 }
 
 # Enable and configure the AutoThrottle extension (disabled by default)

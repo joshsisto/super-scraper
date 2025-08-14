@@ -13,18 +13,18 @@ The Super Scraper Suite is composed of three main components:
 ## Data Flow
 
 ```
-Target Website → Scraper (Scrapy/Playwright/Pydoll) → ValidationManager → Item Pipeline (Deduplication) → CSV File
+Target Website → Scraper (Scrapy/Playwright/Pydoll) → ValidationManager → Item Pipeline (Deduplication) → SQLite Database
 ```
 
 ### Detailed Flow
 
 1. **Input**: User provides URL and validation parameters via command line
-2. **Directory Creation**: Timestamped output directory created in `scraped_results/`
+2. **Directory Creation**: Timestamped log directory created in `scraped_results/`
 3. **Scraping Engine**: One of three scraping methods processes the website
 4. **Data Extraction**: Common data fields extracted using CSS selectors
 5. **Validation**: ValidationManager assesses data quality and bot detection
 6. **Data Processing**: Items cleaned and deduplicated  
-7. **Output**: Clean CSV file saved with validation results and comprehensive logging
+7. **Output**: Data saved to SQLite database with job tracking and comprehensive logging
 
 ## Component Details
 
@@ -50,7 +50,7 @@ super_scraper/ (Scrapy Project)
 
 **Data Pipeline**:
 ```
-Raw HTML → Spider → Item → ValidationManager → ValidationPipeline → DuplicateFilterPipeline → CSV Export
+Raw HTML → Spider → Item → ValidationManager → ValidationPipeline → DuplicateFilterPipeline → SQLite Database
 ```
 
 ### 2. Playwright-based Scraper (`run_playwright_scraper.py`)
@@ -63,7 +63,7 @@ PlaywrightScraper Class
     ├── create_page() (Page configuration)
     ├── scrape_page() (Data extraction)
     ├── extract_item_data() (Item processing)
-    └── save_results() (CSV export)
+    └── save_results() (Database save)
 ```
 
 **Key Features**:
@@ -75,7 +75,7 @@ PlaywrightScraper Class
 
 **Browser Pipeline**:
 ```
-URL → Browser Launch → Page Creation → Content Loading → Data Extraction → ValidationManager → CSV Export
+URL → Browser Launch → Page Creation → Content Loading → Data Extraction → ValidationManager → SQLite Database
 ```
 
 ### 3. Pydoll-based Scraper (`run_pydoll_scraper.py`)
@@ -87,7 +87,7 @@ PydollScraper Class
     ├── try_browser_mode() (Primary method)
     ├── fallback_requests_mode() (Backup method)
     ├── extract_items() (Data processing)
-    └── save_to_csv() (Output)
+    └── save_to_database() (Output)
 ```
 
 **Key Features**:
@@ -98,10 +98,49 @@ PydollScraper Class
 
 **Adaptive Pipeline**:
 ```
-URL → Browser Attempt → Success: Browser Extraction / Failure: Requests Fallback → ValidationManager → CSV Export
+URL → Browser Attempt → Success: Browser Extraction / Failure: Requests Fallback → ValidationManager → SQLite Database
 ```
 
 ## Shared Components
+
+### Database System
+
+The unified database system provides centralized data storage and retrieval across all scrapers:
+
+```
+Database Module (database.py)
+├── Connection Management (thread-safe SQLite)
+├── Schema Management (table creation and indexing)
+├── Data Operations (save_items, get_items_by_job_id, get_recent_jobs)
+├── Statistics & Monitoring (get_database_stats, cleanup_old_data)
+└── CLI Interface (init, stats, cleanup commands)
+```
+
+**Key Features**:
+- **Thread-Safe Operations**: Separate connections per thread with WAL mode
+- **Job Tracking**: Unique `scrape_job_id` for each scraping run
+- **Metadata Support**: JSON field for extensible data storage
+- **Performance Optimization**: Indexed queries and connection pooling
+- **Data Integrity**: Transactional operations with rollback on errors
+- **Cleanup Utilities**: Automated old data removal and statistics
+
+**Database Schema**:
+```sql
+CREATE TABLE scraped_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scrape_job_id TEXT NOT NULL,
+    scraper_type TEXT NOT NULL,
+    url TEXT NOT NULL,
+    title TEXT,
+    price REAL,
+    description TEXT,
+    image_url TEXT,
+    stock_availability INTEGER,
+    sku TEXT,
+    scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    metadata TEXT  -- JSON field for additional data
+);
+```
 
 ### Validation System
 
@@ -123,11 +162,18 @@ ValidationManager
 - **Caching System**: Memory and persistent caching with TTL
 - **Error Recovery**: Multiple fallback strategies for validation failures
 
-### Output Directory Structure
+### Data Storage Structure
+
+**SQLite Database** (`scraped_data.db`):
+- **Table**: `scraped_items` with standardized schema
+- **Job Tracking**: Each scrape gets unique `scrape_job_id`
+- **Metadata**: Additional fields stored as JSON
+- **Indexing**: Optimized queries on job_id, scraper_type, timestamp
+
+**Log Directory Structure**:
 ```
 scraped_results/
 └── domain_YYYYMMDD_HHMMSS/
-    ├── scraped_data.csv (or custom filename)
     └── [scraper_name].log
 ```
 
@@ -172,7 +218,7 @@ All scrapers follow the same general process:
 2. Configure (set up scraper-specific settings)
 3. Extract (process target website)
 4. Transform (clean and validate data)
-5. Load (save to CSV file)
+5. Load (save to SQLite database)
 
 ### 3. Pipeline Pattern (Scrapy)
 Data flows through a series of processing stages:
@@ -181,7 +227,7 @@ Data flows through a series of processing stages:
 - Data validation pipeline
 - Duplicate filtering
 - Format standardization
-- File output
+- Database storage
 
 ## Configuration Management
 
@@ -250,11 +296,12 @@ Data flows through a series of processing stages:
 To add a new scraper engine:
 1. Follow the established CLI argument pattern
 2. Implement the same data extraction interface
-3. Use the common output directory structure
-4. Return data in the standardized field format
+3. Use the common log directory structure
+4. Save data using `database.save_items()` with standardized fields
+5. Generate unique `scrape_job_id` for job tracking
 
 ### Customizing Data Fields
-Modify the `columns` list in each scraper's save method to add new fields.
+Modify the database schema in `database.py` and update each scraper's data extraction to include new fields in the metadata JSON.
 
 ### Adding New Selection Strategies
 Extend the `item_selectors` lists in each scraper to support new website patterns.
@@ -263,7 +310,8 @@ Extend the `item_selectors` lists in each scraper to support new website pattern
 
 ### Core Dependencies
 - **Python 3.8+**: Base runtime
-- **pandas**: Data manipulation and CSV export
+- **sqlite3**: Database operations (built-in)
+- **pandas**: Data manipulation
 - **requests**: HTTP client (fallback mode)
 - **beautifulsoup4**: HTML parsing (fallback mode)
 

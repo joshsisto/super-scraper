@@ -1,13 +1,15 @@
 """
 Unit tests for the Scrapy pipelines.
 
-Tests data validation, cleaning, and duplicate filtering functionality.
+Tests data validation, cleaning, duplicate filtering, and database integration functionality.
 """
 
 import unittest
-from unittest.mock import Mock, MagicMock
+import tempfile
+import os
+from unittest.mock import Mock, MagicMock, patch
 from scrapy.exceptions import DropItem
-from super_scraper.pipelines import DataValidationPipeline, DuplicateFilterPipeline
+from super_scraper.pipelines import DataValidationPipeline, DuplicateFilterPipeline, SQLitePipeline
 from super_scraper.items import SuperScraperItem
 
 
@@ -222,6 +224,136 @@ class TestDuplicateFilterPipeline(unittest.TestCase):
         
         self.assertEqual(result1, item1)
         self.assertEqual(result2, item2)
+
+
+class TestSQLitePipeline(unittest.TestCase):
+    """Test cases for the SQLitePipeline."""
+    
+    def setUp(self):
+        """Set up test fixtures with temporary database."""
+        self.pipeline = SQLitePipeline()
+        self.spider = Mock()
+        self.spider.start_urls = ['https://example.com']
+        
+        # Create temporary database for testing
+        self.temp_db = tempfile.NamedTemporaryFile(suffix='.db', delete=False)
+        self.temp_db.close()
+        
+        # Mock database module to use temp database
+        self.database_patcher = patch('super_scraper.pipelines.database')
+        self.mock_database = self.database_patcher.start()
+        self.mock_database.DB_PATH = self.temp_db.name
+        self.mock_database.init_db.return_value = None
+        self.mock_database.save_items.return_value = 2  # Mock successful save
+    
+    def tearDown(self):
+        """Clean up test fixtures."""
+        self.database_patcher.stop()
+        
+        # Remove temporary database
+        try:
+            os.unlink(self.temp_db.name)
+        except FileNotFoundError:
+            pass
+    
+    def test_pipeline_initialization(self):
+        """Test that pipeline initializes correctly."""
+        # Mock successful database initialization
+        self.mock_database.init_db.side_effect = None
+        
+        pipeline = SQLitePipeline()
+        
+        self.mock_database.init_db.assert_called_once()
+        self.assertTrue(pipeline.database_available)
+    
+    def test_pipeline_initialization_failure(self):
+        """Test handling of database initialization failure."""
+        # Mock database initialization failure
+        self.mock_database.init_db.side_effect = Exception("Database error")
+        
+        pipeline = SQLitePipeline()
+        
+        self.assertFalse(pipeline.database_available)
+    
+    def test_open_spider(self):
+        """Test spider opening functionality."""
+        self.pipeline.open_spider(self.spider)
+        
+        self.assertIsNotNone(self.pipeline.scrape_job_id)
+        self.assertIn('example.com', self.pipeline.scrape_job_id)
+        self.assertEqual(self.pipeline.target_url, 'https://example.com')
+    
+    def test_process_item(self):
+        """Test item processing and collection."""
+        self.pipeline.database_available = True
+        
+        item = SuperScraperItem({
+            'title': 'Test Product',
+            'price': 19.99,
+            'description': 'Test description'
+        })
+        
+        result = self.pipeline.process_item(item, self.spider)
+        
+        self.assertEqual(result, item)
+        self.assertEqual(len(self.pipeline.items_collected), 1)
+        self.assertEqual(self.pipeline.items_collected[0]['title'], 'Test Product')
+    
+    def test_close_spider_saves_items(self):
+        """Test that closing spider saves items to database."""
+        self.pipeline.database_available = True
+        self.pipeline.scrape_job_id = 'test_job_123'
+        self.pipeline.target_url = 'https://example.com'
+        
+        # Add some test items
+        self.pipeline.items_collected = [
+            {'title': 'Product 1', 'price': 10.99},
+            {'title': 'Product 2', 'price': 20.99}
+        ]
+        
+        self.pipeline.close_spider(self.spider)
+        
+        # Verify database.save_items was called with correct parameters
+        self.mock_database.save_items.assert_called_once_with(
+            items=self.pipeline.items_collected,
+            scrape_job_id='test_job_123',
+            scraper_type='scrapy',
+            url='https://example.com'
+        )
+    
+    def test_close_spider_no_items(self):
+        """Test closing spider with no items."""
+        self.pipeline.database_available = True
+        
+        self.pipeline.close_spider(self.spider)
+        
+        # Should not call save_items when no items
+        self.mock_database.save_items.assert_not_called()
+    
+    def test_close_spider_database_unavailable(self):
+        """Test closing spider when database is unavailable."""
+        self.pipeline.database_available = False
+        self.pipeline.items_collected = [{'title': 'Test'}]
+        
+        self.pipeline.close_spider(self.spider)
+        
+        # Should not call save_items when database unavailable
+        self.mock_database.save_items.assert_not_called()
+    
+    def test_close_spider_save_error(self):
+        """Test handling of database save errors."""
+        self.pipeline.database_available = True
+        self.pipeline.items_collected = [{'title': 'Test'}]
+        self.pipeline.scrape_job_id = 'test_job'
+        self.pipeline.target_url = 'https://example.com'
+        
+        # Mock database save error
+        self.mock_database.save_items.side_effect = Exception("Database save error")
+        
+        # Should not raise exception, just log error
+        self.pipeline.close_spider(self.spider)
+        
+        self.mock_database.save_items.assert_called_once()
 
 
 if __name__ == '__main__':
